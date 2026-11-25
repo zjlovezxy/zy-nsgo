@@ -55,30 +55,32 @@ func RootView(cx *core.Scope, app *AppState) core.Node {
 		},
 	}
 
+	keepAlivePane := func(visible func() bool, child core.Node) core.Node {
+		return core.View{
+			Style: ui.FillRest,
+			StyleFunc: func() core.Style {
+				if visible() {
+					return core.Style{Display: core.DisplayFlex}
+				}
+				return core.Style{Display: core.DisplayNone}
+			},
+			Children: []core.Node{child},
+		}
+	}
+
 	mainArea := core.View{
 		Style:     ui.FillRest,
 		StyleFunc: ui.Filled(colors.Background),
 		Children: []core.Node{
+			keepAlivePane(func() bool { return !app.detailOpen.Get() && app.tab.Get() == tabBrowse }, browseView(cx, app)),
+			keepAlivePane(func() bool { return !app.detailOpen.Get() && app.tab.Get() == tabSearch }, searchView(cx, app)),
+			keepAlivePane(func() bool { return !app.detailOpen.Get() && app.tab.Get() == tabFavorites }, favoritesView(cx, app)),
+			keepAlivePane(func() bool { return !app.detailOpen.Get() && app.tab.Get() == tabHistory }, historyView(cx, app)),
+			keepAlivePane(func() bool { return !app.detailOpen.Get() && app.tab.Get() == tabSettings }, settingsView(cx, app)),
 			core.Show{
 				When: app.detailOpen.Get,
 				Then: func(cx *core.Scope) core.Node {
 					return detailPlayerView(cx, app)
-				},
-				Else: func(cx *core.Scope) core.Node {
-					return core.Dynamic(func(cx *core.Scope) core.Node {
-						switch app.tab.Get() {
-						case tabSearch:
-							return searchView(cx, app)
-						case tabFavorites:
-							return favoritesView(cx, app)
-						case tabHistory:
-							return historyView(cx, app)
-						case tabSettings:
-							return settingsView(cx, app)
-						default:
-							return browseView(cx, app)
-						}
-					})
 				},
 			},
 		},
