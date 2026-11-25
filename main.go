@@ -7,6 +7,7 @@ import (
 
 	"github.com/nsgo-dev/nsgo"
 	"github.com/nsgo-dev/nsgo/core"
+	"github.com/nsgo-dev/nsgo/desktop"
 
 	"zy-nsgo/internal/cms"
 	"zy-nsgo/internal/proxy"
@@ -24,16 +25,19 @@ func main() {
 	var openedStore *store.Store
 
 	nsgo.Run(
-		func(cx *core.Scope) core.Node {
-			if openedStore == nil {
-				st, err := openAppStore(cx)
-				if err != nil {
-					log.Fatalf("open store: %v", err)
+		func(appScope *core.Scope) {
+			desktop.SetShutdownMode(appScope, desktop.ShutdownOnMainWindowClose)
+			nsgo.SetMainView(appScope, func(cx *core.Scope) core.Node {
+				if openedStore == nil {
+					st, err := openAppStore(cx)
+					if err != nil {
+						log.Fatalf("open store: %v", err)
+					}
+					openedStore = st
 				}
-				openedStore = st
-			}
-			app := newAppState(cx, client, openedStore, px)
-			return RootView(cx, app)
+				app := newAppState(appScope, cx, client, openedStore, px)
+				return RootView(cx, app)
+			})
 		},
 		nsgo.WindowSize(1200, 780),
 		nsgo.WindowConstraints(core.WindowConstraints{MinWidth: 900, MinHeight: 600}),

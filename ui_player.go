@@ -10,7 +10,7 @@ import (
 	"github.com/nsgo-dev/nsgo/ui"
 )
 
-func detailPlayerView(cx *core.Scope, app *AppState) core.Node {
+func detailPlayerView(cx *core.Scope, app *AppState, standalone bool) core.Node {
 	colors := ui.ColorsOf(cx)
 
 	cx.OnKeyWith("left", core.KeyOptions{When: core.KeyNotEditing, Repeat: true}, func() {
@@ -72,7 +72,7 @@ func detailPlayerView(cx *core.Scope, app *AppState) core.Node {
 				Style: core.Style{Direction: core.Row, AlignItems: core.AlignCenter, Gap: 10, FlexGrow: 1, FlexShrink: 1},
 				Children: []core.Node{
 					ui.Button{
-						Text:    "返回",
+						Text: func() string { if standalone { return "关闭窗口" }; return "返回" }(),
 						Icon:    lucide.ArrowLeft,
 						Size:    ui.SizeSmall,
 						Variant: ui.ButtonOutline,

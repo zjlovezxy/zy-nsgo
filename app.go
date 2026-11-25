@@ -8,6 +8,7 @@ import (
 
 	"github.com/nsgo-dev/nsgo/core"
 	"github.com/nsgo-dev/nsgo/desktop"
+	"github.com/nsgo-dev/nsgo/ui"
 
 	"zy-nsgo/internal/cms"
 	"zy-nsgo/internal/player"
@@ -25,7 +26,10 @@ const (
 
 // AppState holds reactive UI state and orchestrates CMS, SQLite store, proxy, and player.
 type AppState struct {
-	cx     *core.Scope
+	appScope  *core.Scope
+	cx        *core.Scope
+	playerWin *desktop.Window
+	playerCx  *core.Scope
 	cms    *cms.Client
 	store  *store.Store
 	proxy  *proxy.Server
@@ -71,13 +75,14 @@ type AppState struct {
 	settingsMsg *core.Signal[string]
 }
 
-func newAppState(cx *core.Scope, client *cms.Client, st *store.Store, px *proxy.Server) *AppState {
+func newAppState(appScope, cx *core.Scope, client *cms.Client, st *store.Store, px *proxy.Server) *AppState {
 	useProxy := true
 	if v, err := st.GetSetting("use_proxy"); err == nil && v == "false" {
 		useProxy = false
 	}
 
 	a := &AppState{
+		appScope:        appScope,
 		cx:              cx,
 		cms:             client,
 		store:           st,
@@ -314,39 +319,49 @@ func (a *AppState) isPlayerExpanded() bool {
 	return a.fullScreenMode.Get() != fsNone
 }
 
+func (a *AppState) activePlayerScope() *core.Scope {
+	if a.playerCx != nil && a.playerWin != nil && !a.playerWin.Closed() {
+		return a.playerCx
+	}
+	return a.cx
+}
+
 func (a *AppState) togglePageFullScreen() {
+	scope := a.activePlayerScope()
 	cur := a.fullScreenMode.GetUntracked()
 	if cur == fsPage {
 		a.fullScreenMode.Set(fsNone)
 		return
 	}
-	if cur == fsWindow && desktop.FullScreen(a.cx) {
-		desktop.ToggleFullScreen(a.cx)
+	if cur == fsWindow && desktop.FullScreen(scope) {
+		desktop.ToggleFullScreen(scope)
 	}
 	a.fullScreenMode.Set(fsPage)
 }
 
 func (a *AppState) toggleWindowFullScreen() {
+	scope := a.activePlayerScope()
 	cur := a.fullScreenMode.GetUntracked()
 	if cur == fsWindow {
 		a.fullScreenMode.Set(fsNone)
-		if desktop.FullScreen(a.cx) {
-			desktop.ToggleFullScreen(a.cx)
+		if desktop.FullScreen(scope) {
+			desktop.ToggleFullScreen(scope)
 		}
 		return
 	}
 	a.fullScreenMode.Set(fsWindow)
-	if !desktop.FullScreen(a.cx) {
-		desktop.ToggleFullScreen(a.cx)
+	if !desktop.FullScreen(scope) {
+		desktop.ToggleFullScreen(scope)
 	}
 }
 
 func (a *AppState) exitPlayerFullScreen() {
+	scope := a.activePlayerScope()
 	if a.fullScreenMode.GetUntracked() != fsNone {
 		a.fullScreenMode.Set(fsNone)
 	}
-	if desktop.FullScreen(a.cx) {
-		desktop.ToggleFullScreen(a.cx)
+	if desktop.FullScreen(scope) {
+		desktop.ToggleFullScreen(scope)
 	}
 }
 
@@ -401,8 +416,49 @@ func (a *AppState) runSearch(keyword string) {
 	}()
 }
 
-func (a *AppState) openDetail(site cms.Site, vodID string) {
+func (a *AppState) ensurePlayerWindow() {
+	if a.playerWin != nil && !a.playerWin.Closed() {
+		a.playerWin.Focus()
+		a.detailOpen.Set(false)
+		return
+	}
+	w := desktop.OpenWindow(
+		a.appScope,
+		desktop.WindowOptions{
+			Key:         "player",
+			Title:       "ZyNSGo 播放器",
+			Width:       1060,
+			Height:      740,
+			Constraints: core.WindowConstraints{MinWidth: 720, MinHeight: 480},
+		},
+		func(winCx *core.Scope) core.Node {
+			a.playerCx = winCx
+			if curWin := desktop.CurrentWindow(winCx); curWin != nil {
+				curWin.OnClosing(winCx, func(*core.WindowClosing) {
+					a.resetPlaybackOnClose()
+				})
+			}
+			colors := ui.ColorsOf(winCx)
+			return core.View{
+				Style:     ui.FillRest,
+				StyleFunc: ui.Filled(colors.Background),
+				Children:  []core.Node{detailPlayerView(winCx, a, true)},
+			}
+		},
+	)
+	if w != nil {
+		a.playerWin = w
+		a.detailOpen.Set(false)
+		return
+	}
+	// Fallback on mobile/single-window targets.
+	a.playerWin = nil
+	a.playerCx = a.cx
 	a.detailOpen.Set(true)
+}
+
+func (a *AppState) openDetail(site cms.Site, vodID string) {
+	a.ensurePlayerWindow()
 	a.detailSite.Set(site)
 	a.detail.Set(nil)
 	a.detailLoading.Set(true)
@@ -426,6 +482,9 @@ func (a *AppState) openDetail(site cms.Site, vodID string) {
 				return
 			}
 			a.detail.Set(det)
+			if a.playerCx != nil && a.playerWin != nil && !a.playerWin.Closed() && det.Name != "" {
+				desktop.SetTitle(a.playerCx, det.Name+" - ZyNSGo")
+			}
 			lineIdx, epIdx := matchSavedEpisode(det, savedRec)
 			if len(det.Sources) > 0 && len(det.Sources[lineIdx].Episodes) > 0 {
 				a.playEpisode(lineIdx, epIdx)
@@ -491,12 +550,23 @@ func (a *AppState) playEpisode(lineIdx, epIdx int) {
 	})
 }
 
-func (a *AppState) closeDetail() {
-	a.exitPlayerFullScreen()
+func (a *AppState) resetPlaybackOnClose() {
+	a.fullScreenMode.Set(fsNone)
 	a.player.Paused.Set(true)
 	a.player.Source.Set("")
+	a.playerWin = nil
+	a.playerCx = nil
 	a.detailOpen.Set(false)
 	a.reloadHistory()
+}
+
+func (a *AppState) closeDetail() {
+	a.exitPlayerFullScreen()
+	win := a.playerWin
+	a.resetPlaybackOnClose()
+	if win != nil && !win.Closed() {
+		win.Close()
+	}
 }
 
 func (a *AppState) toggleFavorite() {

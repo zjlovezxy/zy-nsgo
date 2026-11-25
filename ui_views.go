@@ -80,7 +80,7 @@ func RootView(cx *core.Scope, app *AppState) core.Node {
 			core.Show{
 				When: app.detailOpen.Get,
 				Then: func(cx *core.Scope) core.Node {
-					return detailPlayerView(cx, app)
+					return detailPlayerView(cx, app, false)
 				},
 			},
 		},
