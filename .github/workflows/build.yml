@@ -71,12 +71,10 @@ jobs:
           mkdir -p artifacts
           case "${{ matrix.target }}" in
             windows_x64)
-              cd dist
-              zip -r -q ../artifacts/ZyNSGo-windows-x64.zip ZyNSGo-*-windows_x64
+              (cd dist && zip -r -q ../artifacts/ZyNSGo-windows-x64.zip ZyNSGo-*-windows_x64)
               ;;
             linux_x64)
-              cd dist
-              tar -czf ../artifacts/ZyNSGo-linux-x64.tar.gz ZyNSGo-*-linux_x64
+              (cd dist && tar -czf ../artifacts/ZyNSGo-linux-x64.tar.gz ZyNSGo-*-linux_x64)
               ;;
             android_arm64)
               cp dist/ZyNSGo-*-android_arm64/ZyNSGo.apk artifacts/ZyNSGo-android-arm64.apk
