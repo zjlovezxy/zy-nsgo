@@ -28,8 +28,9 @@ const (
 type AppState struct {
 	appScope  *core.Scope
 	cx        *core.Scope
-	playerWin *desktop.Window
-	playerCx  *core.Scope
+	playerWin     *desktop.Window
+	playerCx      *core.Scope
+	playerMounted *core.Signal[bool]
 	cms    *cms.Client
 	store  *store.Store
 	proxy  *proxy.Server
@@ -90,6 +91,7 @@ func newAppState(appScope, cx *core.Scope, client *cms.Client, st *store.Store, 
 		player:          player.NewController(cx, st, px),
 		tab:             core.NewSignal(cx, tabBrowse),
 		detailOpen:      core.NewSignal(cx, false),
+		playerMounted:   core.NewSignal(cx, false),
 		sites:           core.NewSignalFunc[[]cms.Site](cx, nil, nil),
 		selectedSiteKey: core.NewSignal(cx, ""),
 		useProxy:        core.NewSignal(cx, useProxy),
@@ -417,6 +419,7 @@ func (a *AppState) runSearch(keyword string) {
 }
 
 func (a *AppState) ensurePlayerWindow() {
+	a.playerMounted.Set(true)
 	if a.playerWin != nil && !a.playerWin.Closed() {
 		a.playerWin.Focus()
 		a.detailOpen.Set(false)
@@ -434,15 +437,30 @@ func (a *AppState) ensurePlayerWindow() {
 		func(winCx *core.Scope) core.Node {
 			a.playerCx = winCx
 			if curWin := desktop.CurrentWindow(winCx); curWin != nil {
-				curWin.OnClosing(winCx, func(*core.WindowClosing) {
-					a.resetPlaybackOnClose()
+				curWin.OnClosing(winCx, func(c *core.WindowClosing) {
+					if a.playerMounted.GetUntracked() {
+						c.Cancel()
+						a.stopAndUnmountPlayer(curWin)
+						return
+					}
+					if a.playerWin == curWin {
+						a.playerWin = nil
+						a.playerCx = nil
+					}
 				})
 			}
 			colors := ui.ColorsOf(winCx)
 			return core.View{
 				Style:     ui.FillRest,
 				StyleFunc: ui.Filled(colors.Background),
-				Children:  []core.Node{detailPlayerView(winCx, a, true)},
+				Children: []core.Node{
+					core.Show{
+						When: a.playerMounted.Get,
+						Then: func(cx *core.Scope) core.Node {
+							return detailPlayerView(cx, a, true)
+						},
+					},
+				},
 			}
 		},
 	)
@@ -550,23 +568,40 @@ func (a *AppState) playEpisode(lineIdx, epIdx int) {
 	})
 }
 
-func (a *AppState) resetPlaybackOnClose() {
+func (a *AppState) stopAndUnmountPlayer(win *desktop.Window) {
 	a.fullScreenMode.Set(fsNone)
 	a.player.Paused.Set(true)
 	a.player.Source.Set("")
-	a.playerWin = nil
-	a.playerCx = nil
+	a.playerMounted.Set(false)
 	a.detailOpen.Set(false)
 	a.reloadHistory()
+
+	if win != nil && !win.Closed() {
+		// Allow one render commit to unmount core.Video (calling apple.Video.Close)
+		// before destroying the NSWindow surface.
+		time.AfterFunc(40*time.Millisecond, func() {
+			a.cx.Post(func() {
+				if a.playerMounted.GetUntracked() {
+					return
+				}
+				if !win.Closed() {
+					win.Close()
+				}
+				if a.playerWin == win {
+					a.playerWin = nil
+					a.playerCx = nil
+				}
+			})
+		})
+	} else {
+		a.playerWin = nil
+		a.playerCx = nil
+	}
 }
 
 func (a *AppState) closeDetail() {
 	a.exitPlayerFullScreen()
-	win := a.playerWin
-	a.resetPlaybackOnClose()
-	if win != nil && !win.Closed() {
-		win.Close()
-	}
+	a.stopAndUnmountPlayer(a.playerWin)
 }
 
 func (a *AppState) toggleFavorite() {
