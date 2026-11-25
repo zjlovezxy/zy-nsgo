@@ -1,0 +1,9 @@
+dist/
+artifacts/
+*.db
+*.db-wal
+*.db-shm
+*.zip
+*.apk
+.DS_Store
+.nsgo/
