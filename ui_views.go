@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/nsgo-dev/nsgo/base"
 	"github.com/nsgo-dev/nsgo/core"
 	"github.com/nsgo-dev/nsgo/icons/lucide"
 	"github.com/nsgo-dev/nsgo/ui"
@@ -215,6 +216,326 @@ func RootView(cx *core.Scope, app *AppState) core.Node {
 
 func browseView(cx *core.Scope, app *AppState) core.Node {
 	colors := ui.ColorsOf(cx)
+	tints := ui.TintsOf(cx)
+
+	siteMenuOpen := core.NewSignal(cx, false)
+	siteFilter := core.NewSignal(cx, "")
+	catMenuOpen := core.NewSignal(cx, false)
+	catFilter := core.NewSignal(cx, "")
+
+	selectedCatName := func() string {
+		catID := app.selectedCatID.Get()
+		if catID == "" {
+			return "全部"
+		}
+		for _, c := range app.categories.Get() {
+			if c.ID == catID {
+				return c.Name
+			}
+		}
+		return "全部"
+	}
+
+	siteSwitcher := core.Dynamic(func(cx *core.Scope) core.Node {
+		sites := app.activeSites()
+		if len(sites) == 0 {
+			return ui.Button{
+				Text:    "添加片源",
+				Icon:    lucide.Plus,
+				Size:    ui.SizeSmall,
+				OnPress: func() { app.switchTab(tabSettings) },
+			}
+		}
+		curKey := app.selectedSiteKey.Get()
+		curName := "选择片源"
+		for _, s := range sites {
+			if s.Key == curKey {
+				curName = s.Name
+				break
+			}
+		}
+		return ui.Popover{
+			Open: siteMenuOpen.Get,
+			OnOpenChange: func(open bool, _ base.Reason) {
+				siteMenuOpen.Set(open)
+				if open {
+					catMenuOpen.Set(false)
+				} else {
+					siteFilter.Set("")
+				}
+			},
+			Align: core.AlignStart,
+			Label: "切换片源",
+			Trigger: ui.Button{
+				Text:    curName + " ▾",
+				Icon:    lucide.Globe,
+				Variant: ui.ButtonOutline,
+				Style:   core.Style{CornerRadius: 10, FontWeight: ui.Semibold},
+			},
+			Style: core.Style{Width: core.Pt(280), MaxWidth: core.Pt(320), Padding: core.All(10), Gap: 8},
+			Children: []core.Node{
+				ui.Input{
+					Value:       siteFilter.Get,
+					OnChange:    func(s string) { siteFilter.Set(s) },
+					Placeholder: fmt.Sprintf("筛选 %d 个启用片源...", len(sites)),
+					Style:       core.Style{Width: core.Pct(100)},
+				},
+				ui.ScrollView{
+					Style:        core.Style{MaxHeight: core.Pt(280), Width: core.Pct(100)},
+					ContentStyle: core.Style{Gap: 3},
+					Children: []core.Node{
+						core.Dynamic(func(cx *core.Scope) core.Node {
+							q := strings.ToLower(strings.TrimSpace(siteFilter.Get()))
+							activeKey := app.selectedSiteKey.Get()
+							var rows []core.Node
+							for _, s := range app.activeSites() {
+								site := s
+								if q != "" && !strings.Contains(strings.ToLower(site.Name), q) && !strings.Contains(strings.ToLower(site.Key), q) {
+									continue
+								}
+								isActive := site.Key == activeKey
+								rows = append(rows, core.View{
+									OnPress: func(core.PressEvent) {
+										app.selectSite(site.Key)
+										siteMenuOpen.Set(false)
+										siteFilter.Set("")
+									},
+									Style: core.Style{
+										Direction:      core.Row,
+										AlignItems:     core.AlignCenter,
+										JustifyContent: core.JustifySpaceBetween,
+										Padding:        core.Symmetric(8, 10),
+										CornerRadius:   8,
+										Gap:            8,
+										Cursor:         core.CursorPointer,
+									},
+									StyleFunc: func() core.Style {
+										if isActive {
+											return core.Style{Background: tints.Accent()}
+										}
+										return core.Style{
+											Background: core.Transparent,
+											Hover:      &core.Style{Background: colors.Hover()},
+										}
+									},
+									Children: []core.Node{
+										core.View{
+											Style: core.Style{Direction: core.Row, AlignItems: core.AlignCenter, Gap: 8, FlexGrow: 1, FlexShrink: 1, MinWidth: core.Pt(0)},
+											Children: []core.Node{
+												core.View{
+													Style:     core.Style{Width: core.Pt(6), Height: core.Pt(6), CornerRadius: 999, FlexShrink: 0},
+													StyleFunc: ui.Filled(colors.Up),
+												},
+												core.Text{
+													Content:  site.Name,
+													MaxLines: 1,
+													Style: core.Style{
+														FontSize: 13,
+														FontWeight: func() core.FontWeight {
+															if isActive {
+																return ui.Semibold
+															}
+															return ui.Medium
+														}(),
+													},
+													StyleFunc: func() core.Style {
+														if isActive {
+															return core.Style{Color: colors.Accent()}
+														}
+														return core.Style{Color: colors.Text()}
+													},
+												},
+											},
+										},
+										func() core.Node {
+											if isActive {
+												return ui.Icon(lucide.Check, 14, colors.Accent)
+											}
+											return ui.Text(site.Key, 11, ui.Regular, colors.Faint)
+										}(),
+									},
+								})
+							}
+							if len(rows) == 0 {
+								return core.View{
+									Style:    core.Style{Padding: core.Symmetric(16, 0), AlignItems: core.AlignCenter},
+									Children: []core.Node{ui.Text("无匹配片源", 12, ui.Regular, colors.Faint)},
+								}
+							}
+							return core.Group(rows)
+						}),
+					},
+				},
+				core.View{
+					Style: core.Style{
+						Padding: core.Edges{Top: 6},
+						Borders: core.Edges{Top: 1},
+					},
+					StyleFunc: func() core.Style {
+						return core.Style{BorderColors: core.EdgeColors{Top: colors.Line()}}
+					},
+					Children: []core.Node{
+						ui.Button{
+							Text:    "管理片源...",
+							Icon:    lucide.Settings,
+							Size:    ui.SizeSmall,
+							Variant: ui.ButtonGhost,
+							Style:   core.Style{Width: core.Pct(100)},
+							OnPress: func() {
+								siteMenuOpen.Set(false)
+								app.switchTab(tabSettings)
+							},
+						},
+					},
+				},
+			},
+		}
+	})
+
+	catTile := func(cx *core.Scope, label string, active bool, onPress func()) core.Node {
+		return core.View{
+			OnPress: func(core.PressEvent) { onPress() },
+			Style: core.Style{
+				AlignItems:     core.AlignCenter,
+				JustifyContent: core.JustifyCenter,
+				Padding:        core.Symmetric(7, 8),
+				CornerRadius:   8,
+				BorderWidth:    1,
+				Cursor:         core.CursorPointer,
+			},
+			StyleFunc: func() core.Style {
+				if active {
+					return core.Style{
+						Background:  colors.AccentFill(),
+						BorderColor: colors.AccentFill(),
+					}
+				}
+				return core.Style{
+					Background:  colors.Inset(),
+					BorderColor: colors.Line(),
+					Hover: &core.Style{
+						Background:  colors.Hover(),
+						BorderColor: ui.Alpha(colors.Accent(), 0.45),
+					},
+				}
+			},
+			Children: []core.Node{
+				core.Text{
+					Content:  label,
+					MaxLines: 1,
+					Style: core.Style{
+						FontSize: 12.5,
+						FontWeight: func() core.FontWeight {
+							if active {
+								return ui.Semibold
+							}
+							return ui.Medium
+						}(),
+					},
+					StyleFunc: func() core.Style {
+						if active {
+							return core.Style{Color: colors.OnAccent()}
+						}
+						return core.Style{Color: colors.Text()}
+					},
+				},
+			},
+		}
+	}
+
+	allCatsPopover := core.Dynamic(func(cx *core.Scope) core.Node {
+		siteKey := app.selectedSiteKey.Get()
+		cats := app.categories.Get()
+		if siteKey == "" || len(cats) == 0 {
+			return core.Group(nil)
+		}
+		triggerVariant := ui.ButtonOutline
+		if catMenuOpen.Get() {
+			triggerVariant = ui.ButtonSecondary
+		}
+		return ui.Popover{
+			Open: catMenuOpen.Get,
+			OnOpenChange: func(open bool, _ base.Reason) {
+				catMenuOpen.Set(open)
+				if open {
+					siteMenuOpen.Set(false)
+				} else {
+					catFilter.Set("")
+				}
+			},
+			Align: core.AlignEnd,
+			Label: "全部分类",
+			Trigger: ui.Button{
+				Text:    fmt.Sprintf("全部分类 (%d) ▾", len(cats)+1),
+				Icon:    lucide.LayoutGrid,
+				Size:    ui.SizeSmall,
+				Variant: triggerVariant,
+			},
+			Style: core.Style{Width: core.Pt(460), MaxWidth: core.Pt(520), Padding: core.All(12), Gap: 10},
+			Children: []core.Node{
+				core.View{
+					Style: core.Style{Direction: core.Row, AlignItems: core.AlignCenter, JustifyContent: core.JustifySpaceBetween, Gap: 10},
+					Children: []core.Node{
+						ui.Text(fmt.Sprintf("全部分类（%d）", len(cats)+1), 13, ui.Semibold, colors.Text),
+						ui.Input{
+							Value:       catFilter.Get,
+							OnChange:    func(s string) { catFilter.Set(s) },
+							Placeholder: "快速定位分类...",
+							Style:       core.Style{Width: core.Pt(180)},
+						},
+					},
+				},
+				ui.ScrollView{
+					Style: core.Style{MaxHeight: core.Pt(280), Width: core.Pct(100)},
+					Children: []core.Node{
+						core.Dynamic(func(cx *core.Scope) core.Node {
+							q := strings.ToLower(strings.TrimSpace(catFilter.Get()))
+							selID := app.selectedCatID.Get()
+							sKey := app.selectedSiteKey.Get()
+							var tiles []core.Node
+							if q == "" || strings.Contains("全部", q) {
+								tiles = append(tiles, catTile(cx, "全部", selID == "", func() {
+									if s, ok := app.findSite(sKey); ok {
+										app.loadPage(s, "", 1)
+									}
+									catMenuOpen.Set(false)
+									catFilter.Set("")
+								}))
+							}
+							for _, c := range app.categories.Get() {
+								cat := c
+								if q != "" && !strings.Contains(strings.ToLower(cat.Name), q) {
+									continue
+								}
+								tiles = append(tiles, catTile(cx, cat.Name, cat.ID == selID, func() {
+									if s, ok := app.findSite(sKey); ok {
+										app.loadPage(s, cat.ID, 1)
+									}
+									catMenuOpen.Set(false)
+									catFilter.Set("")
+								}))
+							}
+							if len(tiles) == 0 {
+								return core.View{
+									Style:    core.Style{Padding: core.Symmetric(20, 0), AlignItems: core.AlignCenter},
+									Children: []core.Node{ui.Text("无匹配分类", 12, ui.Regular, colors.Faint)},
+								}
+							}
+							return core.View{
+								Style: core.Style{
+									Display:             core.DisplayGrid,
+									GridTemplateColumns: core.GridTracks("repeat(4, minmax(0, 1fr))"),
+									Gap:                 6,
+									Width:               core.Pct(100),
+								},
+								Children: tiles,
+							}
+						}),
+					},
+				},
+			},
+		}
+	})
 
 	header := core.View{
 		Style: core.Style{
@@ -222,36 +543,35 @@ func browseView(cx *core.Scope, app *AppState) core.Node {
 			AlignItems:     core.AlignCenter,
 			JustifyContent: core.JustifySpaceBetween,
 			Gap:            12,
-			Padding:        core.Edges{Top: 18, Left: 24, Right: 24, Bottom: 10},
+			Padding:        core.Edges{Top: 14, Left: 24, Right: 24, Bottom: 12},
+			Borders:        core.Edges{Bottom: 1},
 			FlexShrink:     0,
+		},
+		StyleFunc: func() core.Style {
+			return core.Style{BorderColors: core.EdgeColors{Bottom: colors.Line()}}
 		},
 		Children: []core.Node{
 			core.View{
-				Style: core.Style{Gap: 2, FlexGrow: 1, FlexShrink: 1, MinWidth: core.Pt(0)},
+				Style: core.Style{Direction: core.Row, AlignItems: core.AlignCenter, Gap: 12, FlexGrow: 1, FlexShrink: 1, MinWidth: core.Pt(0)},
 				Children: []core.Node{
-					ui.Textf(func() string {
-						if s, ok := app.findSite(app.selectedSiteKey.Get()); ok && s.Name != "" {
-							return s.Name
-						}
-						return "影视库"
-					}, 20, ui.Bold, colors.Text),
+					siteSwitcher,
 					ui.Textf(func() string {
 						if app.selectedSiteKey.Get() == "" {
 							return "配置 CMS 片源后即可浏览最新片库"
 						}
-						n := len(app.videos.Get())
 						if app.loading.Get() {
-							return "正在刷新片库..."
+							return fmt.Sprintf("当前：%s · 正在刷新...", selectedCatName())
 						}
-						return fmt.Sprintf("已加载 %d 部 · 第 %d / %d 页", n, app.page.Get(), app.pageCount.Get())
+						return fmt.Sprintf("当前：%s · 已加载 %d 部 · 第 %d / %d 页", selectedCatName(), len(app.videos.Get()), app.page.Get(), app.pageCount.Get())
 					}, 12.5, ui.Regular, colors.Muted),
 				},
 			},
 			core.View{
-				Style: core.Style{Direction: core.Row, AlignItems: core.AlignCenter, Gap: 8},
+				Style: core.Style{Direction: core.Row, AlignItems: core.AlignCenter, Gap: 8, FlexShrink: 0},
 				Children: []core.Node{
+					allCatsPopover,
 					ui.Button{
-						Text:    "搜索影片",
+						Text:    "搜索",
 						Icon:    lucide.Search,
 						Size:    ui.SizeSmall,
 						Variant: ui.ButtonOutline,
@@ -272,102 +592,84 @@ func browseView(cx *core.Scope, app *AppState) core.Node {
 		},
 	}
 
-	filterArea := core.View{
-		Style: core.Style{
-			Gap:        10,
-			Padding:    core.Edges{Top: 4, Left: 24, Right: 24, Bottom: 14},
-			Borders:    core.Edges{Bottom: 1},
-			FlexShrink: 0,
-		},
-		StyleFunc: func() core.Style {
-			return core.Style{BorderColors: core.EdgeColors{Bottom: colors.Line()}}
-		},
-		Children: []core.Node{
-			// Site selector strip
-			core.View{
-				Style: core.Style{Direction: core.Row, AlignItems: core.AlignCenter, Gap: 10},
-				Children: []core.Node{
-					ui.Text("片源", 12, ui.Semibold, colors.Muted),
-					ui.ScrollView{
-						Horizontal: true,
-						Style:      core.Style{FlexGrow: 1, FlexShrink: 1, MinWidth: core.Pt(0)},
-						ContentStyle: core.Style{
-							Direction:  core.Row,
-							AlignItems: core.AlignCenter,
-							Gap:        8,
-						},
-						Children: []core.Node{
-							core.Dynamic(func(cx *core.Scope) core.Node {
-								sites := app.activeSites()
-								if len(sites) == 0 {
-									return core.View{
-										Style: core.Style{Direction: core.Row, AlignItems: core.AlignCenter, Gap: 10},
-										Children: []core.Node{
-											ui.Text("暂无启用片源", 12.5, ui.Regular, colors.Muted),
-											ui.Button{
-												Text:    "前往添加片源",
-												Icon:    lucide.Plus,
-												Size:    ui.SizeSmall,
-												OnPress: func() { app.switchTab(tabSettings) },
-											},
-										},
-									}
-								}
-								selected := app.selectedSiteKey.Get()
-								nodes := make([]core.Node, 0, len(sites))
-								for _, s := range sites {
-									site := s
-									nodes = append(nodes, filterPill(cx, site.Name, site.Key == selected, true, func() {
-										app.selectSite(site.Key)
-									}))
-								}
-								return core.Group(nodes)
-							}),
-						},
-					},
-				},
-			},
-			// Category strip
-			core.Dynamic(func(cx *core.Scope) core.Node {
-				siteKey := app.selectedSiteKey.Get()
-				if siteKey == "" {
-					return core.Group(nil)
-				}
-				cats := app.categories.Get()
-				selectedCat := app.selectedCatID.Get()
-				nodes := make([]core.Node, 0, len(cats)+1)
-				nodes = append(nodes, filterPill(cx, "全部", selectedCat == "", false, func() {
-					if s, ok := app.findSite(siteKey); ok {
-						app.loadPage(s, "", 1)
+	// Compact 1-row quick category bar (pins active category if beyond first 7, zero horizontal scrollbar)
+	filterArea := core.Dynamic(func(cx *core.Scope) core.Node {
+		siteKey := app.selectedSiteKey.Get()
+		cats := app.categories.Get()
+		if siteKey == "" || len(cats) == 0 {
+			return core.Group(nil)
+		}
+		selectedCat := app.selectedCatID.Get()
+		const maxQuick = 7
+
+		quickCats := make([]cms.Category, 0, maxQuick)
+		selectedIncluded := selectedCat == ""
+		for i, c := range cats {
+			if i >= maxQuick {
+				break
+			}
+			quickCats = append(quickCats, c)
+			if c.ID == selectedCat {
+				selectedIncluded = true
+			}
+		}
+		if !selectedIncluded {
+			for _, c := range cats {
+				if c.ID == selectedCat {
+					if len(quickCats) >= maxQuick {
+						quickCats = append([]cms.Category{c}, quickCats[:maxQuick-1]...)
+					} else {
+						quickCats = append([]cms.Category{c}, quickCats...)
 					}
-				}))
-				for _, c := range cats {
-					cat := c
-					nodes = append(nodes, filterPill(cx, cat.Name, cat.ID == selectedCat, false, func() {
-						if s, ok := app.findSite(siteKey); ok {
-							app.loadPage(s, cat.ID, 1)
-						}
-					}))
+					break
 				}
-				return core.View{
-					Style: core.Style{Direction: core.Row, AlignItems: core.AlignCenter, Gap: 10},
-					Children: []core.Node{
-						ui.Text("分类", 12, ui.Semibold, colors.Muted),
-						ui.ScrollView{
-							Horizontal: true,
-							Style:      core.Style{FlexGrow: 1, FlexShrink: 1, MinWidth: core.Pt(0)},
-							ContentStyle: core.Style{
-								Direction:  core.Row,
-								AlignItems: core.AlignCenter,
-								Gap:        6,
-							},
-							Children: nodes,
-						},
-					},
+			}
+		}
+
+		nodes := make([]core.Node, 0, len(quickCats)+2)
+		nodes = append(nodes, filterPill(cx, "全部", selectedCat == "", false, func() {
+			if s, ok := app.findSite(siteKey); ok {
+				app.loadPage(s, "", 1)
+			}
+		}))
+		for _, c := range quickCats {
+			cat := c
+			nodes = append(nodes, filterPill(cx, cat.Name, cat.ID == selectedCat, false, func() {
+				if s, ok := app.findSite(siteKey); ok {
+					app.loadPage(s, cat.ID, 1)
 				}
-			}),
-		},
-	}
+			}))
+		}
+		if len(cats) > maxQuick {
+			nodes = append(nodes, ui.Button{
+				Text:    fmt.Sprintf("+ 更多 (%d)", len(cats)-maxQuick),
+				Size:    ui.SizeSmall,
+				Variant: ui.ButtonGhost,
+				OnPress: func() {
+					catMenuOpen.Set(true)
+				},
+			})
+		}
+
+		return core.View{
+			Style: core.Style{
+				Direction:  core.Row,
+				AlignItems: core.AlignCenter,
+				Wrap:       core.Wrap,
+				Gap:        6,
+				Padding:    core.Symmetric(10, 24),
+				Borders:    core.Edges{Bottom: 1},
+				FlexShrink: 0,
+			},
+			StyleFunc: func() core.Style {
+				return core.Style{
+					Background:   colors.Inset(),
+					BorderColors: core.EdgeColors{Bottom: colors.Line()},
+				}
+			},
+			Children: nodes,
+		}
+	})
 
 	grid := ui.ScrollView{
 		Style:        ui.FillRest,
