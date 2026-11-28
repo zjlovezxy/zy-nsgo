@@ -28,6 +28,7 @@ func main() {
 		func(appScope *core.Scope) {
 			desktop.SetShutdownMode(appScope, desktop.ShutdownOnMainWindowClose)
 			nsgo.SetMainView(appScope, func(cx *core.Scope) core.Node {
+				cx.SetTheme(cinemaTheme())
 				if openedStore == nil {
 					st, err := openAppStore(cx)
 					if err != nil {
@@ -39,8 +40,8 @@ func main() {
 				return RootView(cx, app)
 			})
 		},
-		nsgo.WindowSize(1200, 780),
-		nsgo.WindowConstraints(core.WindowConstraints{MinWidth: 900, MinHeight: 600}),
+		nsgo.WindowSize(1280, 820),
+		nsgo.WindowConstraints(core.WindowConstraints{MinWidth: 920, MinHeight: 620}),
 	)
 
 	if openedStore != nil {

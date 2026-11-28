@@ -26,15 +26,15 @@ const (
 
 // AppState holds reactive UI state and orchestrates CMS, SQLite store, proxy, and player.
 type AppState struct {
-	appScope  *core.Scope
-	cx        *core.Scope
+	appScope      *core.Scope
+	cx            *core.Scope
 	playerWin     *desktop.Window
 	playerCx      *core.Scope
 	playerMounted *core.Signal[bool]
-	cms    *cms.Client
-	store  *store.Store
-	proxy  *proxy.Server
-	player *player.Controller
+	cms           *cms.Client
+	store         *store.Store
+	proxy         *proxy.Server
+	player        *player.Controller
 
 	tab        *core.Signal[string]
 	detailOpen *core.Signal[bool]
@@ -42,16 +42,17 @@ type AppState struct {
 	sites           *core.Signal[[]cms.Site]
 	selectedSiteKey *core.Signal[string]
 	useProxy        *core.Signal[bool]
+	appearance      *core.Signal[string]
 
-	categories    *core.Signal[[]cms.Category]
-	selectedCatID *core.Signal[string]
-	page          *core.Signal[int]
-	pageCount     *core.Signal[int]
-	videos        *core.Signal[[]cms.VodItem]
-	loading          *core.Signal[bool]
-	loadingMore      *core.Signal[bool]
-	statusMsg        *core.Signal[string]
-	fullScreenMode   *core.Signal[string]
+	categories     *core.Signal[[]cms.Category]
+	selectedCatID  *core.Signal[string]
+	page           *core.Signal[int]
+	pageCount      *core.Signal[int]
+	videos         *core.Signal[[]cms.VodItem]
+	loading        *core.Signal[bool]
+	loadingMore    *core.Signal[bool]
+	statusMsg      *core.Signal[string]
+	fullScreenMode *core.Signal[string]
 
 	searchQuery        *core.Signal[string]
 	searching          *core.Signal[bool]
@@ -61,12 +62,14 @@ type AppState struct {
 	favorites *core.Signal[[]store.FavoriteRecord]
 	history   *core.Signal[[]store.HistoryRecord]
 
-	detail        *core.Signal[*cms.VodDetail]
-	detailSite    *core.Signal[cms.Site]
-	detailLoading *core.Signal[bool]
-	isFav         *core.Signal[bool]
-	activeLineIdx *core.Signal[int]
-	activeEpIdx   *core.Signal[int]
+	detail          *core.Signal[*cms.VodDetail]
+	detailSite      *core.Signal[cms.Site]
+	detailLoading   *core.Signal[bool]
+	isFav           *core.Signal[bool]
+	activeLineIdx   *core.Signal[int]
+	activeEpIdx     *core.Signal[int]
+	playerPanelOpen *core.Signal[bool]
+	playerSideTab   *core.Signal[string]
 
 	// Settings form inputs
 	newSiteKey  *core.Signal[string]
@@ -81,46 +84,54 @@ func newAppState(appScope, cx *core.Scope, client *cms.Client, st *store.Store, 
 	if v, err := st.GetSetting("use_proxy"); err == nil && v == "false" {
 		useProxy = false
 	}
+	appearance := appearanceDark
+	if v, err := st.GetSetting("appearance"); err == nil && (v == appearanceDark || v == appearanceLight || v == appearanceSystem) {
+		appearance = v
+	}
+	applyAppearance(cx, appearance)
 
 	a := &AppState{
-		appScope:        appScope,
-		cx:              cx,
-		cms:             client,
-		store:           st,
-		proxy:           px,
-		player:          player.NewController(cx, st, px),
-		tab:             core.NewSignal(cx, tabBrowse),
-		detailOpen:      core.NewSignal(cx, false),
-		playerMounted:   core.NewSignal(cx, false),
-		sites:           core.NewSignalFunc[[]cms.Site](cx, nil, nil),
-		selectedSiteKey: core.NewSignal(cx, ""),
-		useProxy:        core.NewSignal(cx, useProxy),
-		categories:      core.NewSignalFunc[[]cms.Category](cx, nil, nil),
-		selectedCatID:   core.NewSignal(cx, ""),
-		page:            core.NewSignal(cx, 1),
-		pageCount:       core.NewSignal(cx, 1),
-		videos:          core.NewSignalFunc[[]cms.VodItem](cx, nil, nil),
-		loading:          core.NewSignal(cx, false),
-		loadingMore:      core.NewSignal(cx, false),
-		statusMsg:        core.NewSignal(cx, ""),
-		fullScreenMode:   core.NewSignal(cx, ""),
+		appScope:           appScope,
+		cx:                 cx,
+		cms:                client,
+		store:              st,
+		proxy:              px,
+		player:             player.NewController(cx, st, px),
+		tab:                core.NewSignal(cx, tabBrowse),
+		detailOpen:         core.NewSignal(cx, false),
+		playerMounted:      core.NewSignal(cx, false),
+		sites:              core.NewSignalFunc[[]cms.Site](cx, nil, nil),
+		selectedSiteKey:    core.NewSignal(cx, ""),
+		useProxy:           core.NewSignal(cx, useProxy),
+		appearance:         core.NewSignal(cx, appearance),
+		categories:         core.NewSignalFunc[[]cms.Category](cx, nil, nil),
+		selectedCatID:      core.NewSignal(cx, ""),
+		page:               core.NewSignal(cx, 1),
+		pageCount:          core.NewSignal(cx, 1),
+		videos:             core.NewSignalFunc[[]cms.VodItem](cx, nil, nil),
+		loading:            core.NewSignal(cx, false),
+		loadingMore:        core.NewSignal(cx, false),
+		statusMsg:          core.NewSignal(cx, ""),
+		fullScreenMode:     core.NewSignal(cx, ""),
 		searchQuery:        core.NewSignal(cx, ""),
 		searching:          core.NewSignal(cx, false),
 		searchResults:      core.NewSignalFunc[[]cms.SearchResult](cx, nil, nil),
 		searchSelectedKeys: core.NewSignalFunc[map[string]bool](cx, map[string]bool{}, nil),
-		favorites:       core.NewSignalFunc[[]store.FavoriteRecord](cx, nil, nil),
-		history:         core.NewSignalFunc[[]store.HistoryRecord](cx, nil, nil),
-		detail:          core.NewSignalFunc[*cms.VodDetail](cx, nil, nil),
-		detailSite:      core.NewSignalFunc[cms.Site](cx, cms.Site{}, nil),
-		detailLoading:   core.NewSignal(cx, false),
-		isFav:           core.NewSignal(cx, false),
-		activeLineIdx:   core.NewSignal(cx, 0),
-		activeEpIdx:     core.NewSignal(cx, 0),
-		newSiteKey:      core.NewSignal(cx, ""),
-		newSiteName:     core.NewSignal(cx, ""),
-		newSiteAPI:      core.NewSignal(cx, ""),
-		importJSON:      core.NewSignal(cx, ""),
-		settingsMsg:     core.NewSignal(cx, ""),
+		favorites:          core.NewSignalFunc[[]store.FavoriteRecord](cx, nil, nil),
+		history:            core.NewSignalFunc[[]store.HistoryRecord](cx, nil, nil),
+		detail:             core.NewSignalFunc[*cms.VodDetail](cx, nil, nil),
+		detailSite:         core.NewSignalFunc[cms.Site](cx, cms.Site{}, nil),
+		detailLoading:      core.NewSignal(cx, false),
+		isFav:              core.NewSignal(cx, false),
+		activeLineIdx:      core.NewSignal(cx, 0),
+		activeEpIdx:        core.NewSignal(cx, 0),
+		playerPanelOpen:    core.NewSignal(cx, true),
+		playerSideTab:      core.NewSignal(cx, "episodes"),
+		newSiteKey:         core.NewSignal(cx, ""),
+		newSiteName:        core.NewSignal(cx, ""),
+		newSiteAPI:         core.NewSignal(cx, ""),
+		importJSON:         core.NewSignal(cx, ""),
+		settingsMsg:        core.NewSignal(cx, ""),
 	}
 
 	a.player.OnEpisodeEnd = func() {
@@ -430,11 +441,13 @@ func (a *AppState) ensurePlayerWindow() {
 		desktop.WindowOptions{
 			Key:         "player",
 			Title:       "ZyNSGo 播放器",
-			Width:       1060,
-			Height:      740,
-			Constraints: core.WindowConstraints{MinWidth: 720, MinHeight: 480},
+			Width:       1180,
+			Height:      760,
+			Constraints: core.WindowConstraints{MinWidth: 780, MinHeight: 500},
 		},
 		func(winCx *core.Scope) core.Node {
+			winCx.SetTheme(cinemaTheme())
+			applyAppearance(winCx, a.appearance.GetUntracked())
 			a.playerCx = winCx
 			if curWin := desktop.CurrentWindow(winCx); curWin != nil {
 				curWin.OnClosing(winCx, func(c *core.WindowClosing) {
@@ -647,6 +660,22 @@ func (a *AppState) setUseProxy(enabled bool) {
 		val = "true"
 	}
 	_ = a.store.SetSetting("use_proxy", val)
+}
+
+func (a *AppState) setAppearance(mode string) {
+	if mode != appearanceDark && mode != appearanceLight && mode != appearanceSystem {
+		mode = appearanceDark
+	}
+	a.appearance.Set(mode)
+	applyAppearance(a.cx, mode)
+	if a.playerCx != nil && a.playerWin != nil && !a.playerWin.Closed() {
+		applyAppearance(a.playerCx, mode)
+	}
+	_ = a.store.SetSetting("appearance", mode)
+}
+
+func (a *AppState) togglePlayerPanel() {
+	a.playerPanelOpen.Update(func(open bool) bool { return !open })
 }
 
 func (a *AppState) addSite() {
